@@ -83,7 +83,9 @@ else
   tokens_display="${total_tokens}"
 fi
 
-if [ "$ctx_window_size" -ge 1000 ]; then
+if [ "$ctx_window_size" -ge 1000000 ]; then
+  ctx_display=$(awk "BEGIN {printf \"%.1f\", $ctx_window_size / 1000000}")M
+elif [ "$ctx_window_size" -ge 1000 ]; then
   ctx_display=$(awk "BEGIN {printf \"%.0f\", $ctx_window_size / 1000}")k
 else
   ctx_display="${ctx_window_size}"
@@ -102,18 +104,56 @@ cost_usd=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
 cost_display=$(awk "BEGIN {printf \"%.2f\", $cost_usd}")
 out+=" \033[38;5;240m│\033[0m \033[38;5;156m\$${cost_display}\033[0m"
 
-# ── Rate limit ────────────────────────────────────────────
-rate_pct=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
-if [ -n "$rate_pct" ]; then
-  rate_int=$(printf "%.0f" "$rate_pct")
-  if [ "$rate_int" -lt 50 ]; then
-    rate_color="108"
-  elif [ "$rate_int" -lt 80 ]; then
-    rate_color="222"
+# ── Rate limits ───────────────────────────────────────────
+rate_5h=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
+rate_7d=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
+resets_at=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty')
+
+rate_limit_color() {
+  if [ "$1" -lt 50 ]; then
+    echo "108"
+  elif [ "$1" -lt 80 ]; then
+    echo "222"
   else
-    rate_color="196"
+    echo "196"
   fi
-  out+=" \033[38;5;240m│\033[0m \033[38;5;${rate_color}m(${rate_int}%%)\033[0m"
+}
+
+rate_parts=""
+if [ -n "$rate_5h" ]; then
+  rate_int=$(printf "%.0f" "$rate_5h")
+  rc=$(rate_limit_color "$rate_int")
+  rate_parts+="\033[38;5;240m5h:\033[0m \033[38;5;${rc}m${rate_int}%%\033[0m"
+fi
+if [ -n "$rate_7d" ]; then
+  rate_int=$(printf "%.0f" "$rate_7d")
+  rc=$(rate_limit_color "$rate_int")
+  if [ -n "$rate_parts" ]; then
+    rate_parts+=" \033[38;5;240m│\033[0m "
+  fi
+  rate_parts+="\033[38;5;240m7d:\033[0m \033[38;5;${rc}m${rate_int}%%\033[0m"
+fi
+if [ -n "$rate_parts" ]; then
+  out+=" \033[38;5;240m│\033[0m ${rate_parts}"
+fi
+
+if [ -n "$resets_at" ]; then
+  now=$(date +%s)
+  remaining=$((resets_at - now))
+  if [ "$remaining" -le 0 ]; then
+    dur="now"
+  else
+    hours=$((remaining / 3600))
+    minutes=$(( (remaining % 3600) / 60 ))
+    if [ "$hours" -ge 24 ]; then
+      days=$((hours / 24))
+      hours=$((hours % 24))
+      dur="${days}d${hours}h"
+    else
+      dur="${hours}h${minutes}m"
+    fi
+  fi
+  out+=" \033[38;5;240m│\033[0m \033[38;5;245m⟳ ${dur}\033[0m"
 fi
 
 printf "$out"
