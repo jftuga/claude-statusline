@@ -14,7 +14,7 @@ import (
 )
 
 const pgmName = "claude-statusline"
-const pgmVersion = "1.0.0"
+const pgmVersion = "1.1.0"
 const pgmUrl = "https://github.com/jftuga/claude-statusline"
 
 type statusInput struct {
@@ -40,6 +40,7 @@ type statusInput struct {
 	RateLimits *struct {
 		FiveHour *struct {
 			UsedPercentage float64 `json:"used_percentage"`
+			ResetsAt       int64   `json:"resets_at"`
 		} `json:"five_hour"`
 		SevenDay *struct {
 			UsedPercentage float64 `json:"used_percentage"`
@@ -175,18 +176,24 @@ func main() {
 		var rateParts []string
 		if input.RateLimits.FiveHour != nil {
 			pct := int(math.Round(input.RateLimits.FiveHour.UsedPercentage))
-			rateParts = append(rateParts, fmt.Sprintf("\033[38;5;240m5h:\033[0m \033[38;5;%dm%d%%\033[0m", rateLimitColor(pct), pct))
+			part := fmt.Sprintf("\033[38;5;240m5h:\033[0m \033[38;5;%dm%d%%\033[0m", rateLimitColor(pct), pct)
+			if input.RateLimits.FiveHour.ResetsAt > 0 {
+				remaining := time.Unix(input.RateLimits.FiveHour.ResetsAt, 0).Sub(time.Now())
+				part += fmt.Sprintf(" \033[38;5;245m⟳ %s\033[0m", formatDuration(remaining))
+			}
+			rateParts = append(rateParts, part)
 		}
 		if input.RateLimits.SevenDay != nil {
 			pct := int(math.Round(input.RateLimits.SevenDay.UsedPercentage))
-			rateParts = append(rateParts, fmt.Sprintf("\033[38;5;240m7d:\033[0m \033[38;5;%dm%d%%\033[0m", rateLimitColor(pct), pct))
+			part := fmt.Sprintf("\033[38;5;240m7d:\033[0m \033[38;5;%dm%d%%\033[0m", rateLimitColor(pct), pct)
+			if input.RateLimits.SevenDay.ResetsAt > 0 {
+				remaining := time.Unix(input.RateLimits.SevenDay.ResetsAt, 0).Sub(time.Now())
+				part += fmt.Sprintf(" \033[38;5;245m⟳ %s\033[0m", formatDuration(remaining))
+			}
+			rateParts = append(rateParts, part)
 		}
 		if len(rateParts) > 0 {
-			fmt.Fprintf(&out, " \033[38;5;240m│\033[0m %s", strings.Join(rateParts, " \033[38;5;240m│\033[0m "))
-		}
-		if input.RateLimits.SevenDay != nil && input.RateLimits.SevenDay.ResetsAt > 0 {
-			remaining := time.Unix(input.RateLimits.SevenDay.ResetsAt, 0).Sub(time.Now())
-			fmt.Fprintf(&out, " \033[38;5;240m│\033[0m \033[38;5;245m⟳ %s\033[0m", formatDuration(remaining))
+			fmt.Fprintf(&out, " \033[38;5;240m│\033[0m %s", strings.Join(rateParts, " \033[38;5;240m|\033[0m "))
 		}
 	}
 
