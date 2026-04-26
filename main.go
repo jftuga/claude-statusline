@@ -10,7 +10,12 @@ import (
 	"math"
 	"os"
 	"strings"
+	"time"
 )
+
+const pgmName = "claude-statusline"
+const pgmVersion = "1.0.0"
+const pgmUrl = "https://github.com/jftuga/claude-statusline"
 
 type statusInput struct {
 	Model struct {
@@ -36,6 +41,10 @@ type statusInput struct {
 		FiveHour *struct {
 			UsedPercentage float64 `json:"used_percentage"`
 		} `json:"five_hour"`
+		SevenDay *struct {
+			UsedPercentage float64 `json:"used_percentage"`
+			ResetsAt       int64   `json:"resets_at"`
+		} `json:"seven_day"`
 	} `json:"rate_limits"`
 }
 
@@ -45,6 +54,32 @@ var (
 	gradientHigh = [20]int{186, 222, 222, 223, 217, 210, 210, 209, 203, 203, 167, 167, 131, 131, 125, 125, 124, 124, 196, 196}
 	gradientCrit = [20]int{209, 203, 203, 167, 167, 131, 131, 125, 125, 124, 124, 196, 196, 196, 160, 160, 160, 124, 124, 124}
 )
+
+func rateLimitColor(pct int) int {
+	switch {
+	case pct < 50:
+		return 108
+	case pct < 80:
+		return 222
+	default:
+		return 196
+	}
+}
+
+func formatDuration(d time.Duration) string {
+	if d <= 0 {
+		return "now"
+	}
+	total := int(d.Seconds())
+	h := total / 3600
+	m := (total % 3600) / 60
+	if h >= 24 {
+		days := h / 24
+		h = h % 24
+		return fmt.Sprintf("%dd%dh", days, h)
+	}
+	return fmt.Sprintf("%dh%dm", h, m)
+}
 
 func formatTokens(n int) string {
 	if n >= 1_000_000 {
@@ -57,13 +92,21 @@ func formatTokens(n int) string {
 }
 
 func main() {
+	if len(os.Args) == 2 && (os.Args[1] == "-v" || os.Args[1] == "--version") {
+		fmt.Printf("%s v%s\n", pgmName, pgmVersion)
+		fmt.Println(pgmUrl)
+		return
+	}
+
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "statusline: read stdin: %v\n", err)
 		os.Exit(1)
 	}
 
 	var input statusInput
 	if err := json.Unmarshal(data, &input); err != nil {
+		fmt.Fprintf(os.Stderr, "statusline: parse json: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -128,18 +171,23 @@ func main() {
 
 	fmt.Fprintf(&out, " \033[38;5;240m│\033[0m \033[38;5;156m$%.2f\033[0m", input.Cost.TotalCostUSD)
 
-	if input.RateLimits != nil && input.RateLimits.FiveHour != nil {
-		pct := int(math.Round(input.RateLimits.FiveHour.UsedPercentage))
-		var color int
-		switch {
-		case pct < 50:
-			color = 108
-		case pct < 80:
-			color = 222
-		default:
-			color = 196
+	if input.RateLimits != nil {
+		var rateParts []string
+		if input.RateLimits.FiveHour != nil {
+			pct := int(math.Round(input.RateLimits.FiveHour.UsedPercentage))
+			rateParts = append(rateParts, fmt.Sprintf("\033[38;5;240m5h:\033[0m \033[38;5;%dm%d%%\033[0m", rateLimitColor(pct), pct))
 		}
-		fmt.Fprintf(&out, " \033[38;5;240m│\033[0m \033[38;5;%dm(%d%%)\033[0m", color, pct)
+		if input.RateLimits.SevenDay != nil {
+			pct := int(math.Round(input.RateLimits.SevenDay.UsedPercentage))
+			rateParts = append(rateParts, fmt.Sprintf("\033[38;5;240m7d:\033[0m \033[38;5;%dm%d%%\033[0m", rateLimitColor(pct), pct))
+		}
+		if len(rateParts) > 0 {
+			fmt.Fprintf(&out, " \033[38;5;240m│\033[0m %s", strings.Join(rateParts, " \033[38;5;240m│\033[0m "))
+		}
+		if input.RateLimits.SevenDay != nil && input.RateLimits.SevenDay.ResetsAt > 0 {
+			remaining := time.Unix(input.RateLimits.SevenDay.ResetsAt, 0).Sub(time.Now())
+			fmt.Fprintf(&out, " \033[38;5;240m│\033[0m \033[38;5;245m⟳ %s\033[0m", formatDuration(remaining))
+		}
 	}
 
 	fmt.Print(out.String())
