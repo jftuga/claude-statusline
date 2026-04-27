@@ -62,6 +62,31 @@ Then in `~/.claude/settings.json`:
 }
 ```
 
+## Flags
+
+Individual sections can be hidden with `--no-*` flags:
+
+| Flag | Hides |
+|---|---|
+| `--no-model` | Model name and effort level |
+| `--no-bar` | Progress bar and percentage |
+| `--no-tokens` | Token counter |
+| `--no-cached` | Cache indicator |
+| `--no-cost` | Session cost |
+| `--no-5h` | 5-hour rate limit |
+| `--no-7d` | 7-day rate limit |
+
+Append flags directly to the command in `settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/claude-statusline --no-bar --no-cached --no-cost"
+  }
+}
+```
+
 ## JSON Input
 
 The binary reads the Claude Code status line JSON from stdin. Fields consumed:

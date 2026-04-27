@@ -5,6 +5,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"math"
@@ -14,7 +15,7 @@ import (
 )
 
 const pgmName = "claude-statusline"
-const pgmVersion = "1.1.0"
+const pgmVersion = "1.2.0"
 const pgmUrl = "https://github.com/jftuga/claude-statusline"
 
 type statusInput struct {
@@ -93,7 +94,19 @@ func formatTokens(n int) string {
 }
 
 func main() {
-	if len(os.Args) == 2 && (os.Args[1] == "-v" || os.Args[1] == "--version") {
+	var showVersion, noModel, noBar, noTokens, noCached, noCost, no5h, no7d bool
+	flag.BoolVar(&showVersion, "v", false, "show version")
+	flag.BoolVar(&showVersion, "version", false, "show version")
+	flag.BoolVar(&noModel, "no-model", false, "hide model name and effort level")
+	flag.BoolVar(&noBar, "no-bar", false, "hide progress bar and percentage")
+	flag.BoolVar(&noTokens, "no-tokens", false, "hide token counter")
+	flag.BoolVar(&noCached, "no-cached", false, "hide cache indicator")
+	flag.BoolVar(&noCost, "no-cost", false, "hide session cost")
+	flag.BoolVar(&no5h, "no-5h", false, "hide 5-hour rate limit")
+	flag.BoolVar(&no7d, "no-7d", false, "hide 7-day rate limit")
+	flag.Parse()
+
+	if showVersion {
 		fmt.Printf("%s v%s\n", pgmName, pgmVersion)
 		fmt.Println(pgmUrl)
 		return
@@ -111,16 +124,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	var out strings.Builder
+	usage := input.ContextWindow.CurrentUsage
+	var sections []string
 
-	modelShort := strings.TrimPrefix(input.Model.DisplayName, "Claude ")
-	fmt.Fprintf(&out, "\033[38;5;141m◆\033[0m \033[1;38;5;183m%s\033[0m", modelShort)
-
-	if input.Effort != nil && input.Effort.Level != "" {
-		fmt.Fprintf(&out, " \033[38;5;141m(%s)\033[0m", input.Effort.Level)
+	if !noModel {
+		var s strings.Builder
+		modelShort := strings.TrimPrefix(input.Model.DisplayName, "Claude ")
+		fmt.Fprintf(&s, "\033[38;5;141m◆\033[0m \033[1;38;5;183m%s\033[0m", modelShort)
+		if input.Effort != nil && input.Effort.Level != "" {
+			fmt.Fprintf(&s, " \033[38;5;141m(%s)\033[0m", input.Effort.Level)
+		}
+		sections = append(sections, s.String())
 	}
 
-	if input.ContextWindow.UsedPercentage != nil {
+	if !noBar && input.ContextWindow.UsedPercentage != nil {
+		var s strings.Builder
 		usedPct := *input.ContextWindow.UsedPercentage
 		usedInt := int(math.Round(usedPct))
 
@@ -137,13 +155,11 @@ func main() {
 		}
 
 		filled := (usedInt * 20) / 100
-
-		out.WriteString(" \033[38;5;240m│\033[0m ")
 		for i := range 20 {
 			if i < filled {
-				fmt.Fprintf(&out, "\033[38;5;%dm━\033[0m", gradient[i])
+				fmt.Fprintf(&s, "\033[38;5;%dm━\033[0m", gradient[i])
 			} else {
-				out.WriteString("\033[38;5;238m╌\033[0m")
+				s.WriteString("\033[38;5;238m╌\033[0m")
 			}
 		}
 
@@ -158,23 +174,26 @@ func main() {
 		default:
 			pctColor = 196
 		}
-
-		fmt.Fprintf(&out, " \033[1;38;5;%dm%d%%\033[0m", pctColor, usedInt)
+		fmt.Fprintf(&s, " \033[1;38;5;%dm%d%%\033[0m", pctColor, usedInt)
+		sections = append(sections, s.String())
 	}
 
-	usage := input.ContextWindow.CurrentUsage
-	totalTokens := usage.CacheReadInputTokens + usage.CacheCreationInputTokens + usage.InputTokens + usage.OutputTokens
-	fmt.Fprintf(&out, " \033[38;5;240m│\033[0m \033[38;5;75m⟐\033[0m \033[38;5;117m%s\033[38;5;240m/\033[38;5;60m%s\033[0m", formatTokens(totalTokens), formatTokens(input.ContextWindow.ContextWindowSize))
-
-	if usage.CacheReadInputTokens > 0 {
-		fmt.Fprintf(&out, " \033[38;5;240m│\033[0m \033[38;5;220m⚡\033[38;5;179m%dk cached\033[0m", usage.CacheReadInputTokens/1000)
+	if !noTokens {
+		totalTokens := usage.CacheReadInputTokens + usage.CacheCreationInputTokens + usage.InputTokens + usage.OutputTokens
+		sections = append(sections, fmt.Sprintf("\033[38;5;75m⟐\033[0m \033[38;5;117m%s\033[38;5;240m/\033[38;5;60m%s\033[0m", formatTokens(totalTokens), formatTokens(input.ContextWindow.ContextWindowSize)))
 	}
 
-	fmt.Fprintf(&out, " \033[38;5;240m│\033[0m \033[38;5;156m$%.2f\033[0m", input.Cost.TotalCostUSD)
+	if !noCached && usage.CacheReadInputTokens > 0 {
+		sections = append(sections, fmt.Sprintf("\033[38;5;220m⚡\033[38;5;179m%dk cached\033[0m", usage.CacheReadInputTokens/1000))
+	}
+
+	if !noCost {
+		sections = append(sections, fmt.Sprintf("\033[38;5;156m$%.2f\033[0m", input.Cost.TotalCostUSD))
+	}
 
 	if input.RateLimits != nil {
 		var rateParts []string
-		if input.RateLimits.FiveHour != nil {
+		if !no5h && input.RateLimits.FiveHour != nil {
 			pct := int(math.Round(input.RateLimits.FiveHour.UsedPercentage))
 			part := fmt.Sprintf("\033[38;5;240m5h:\033[0m \033[38;5;%dm%d%%\033[0m", rateLimitColor(pct), pct)
 			if input.RateLimits.FiveHour.ResetsAt > 0 {
@@ -183,7 +202,7 @@ func main() {
 			}
 			rateParts = append(rateParts, part)
 		}
-		if input.RateLimits.SevenDay != nil {
+		if !no7d && input.RateLimits.SevenDay != nil {
 			pct := int(math.Round(input.RateLimits.SevenDay.UsedPercentage))
 			part := fmt.Sprintf("\033[38;5;240m7d:\033[0m \033[38;5;%dm%d%%\033[0m", rateLimitColor(pct), pct)
 			if input.RateLimits.SevenDay.ResetsAt > 0 {
@@ -193,9 +212,10 @@ func main() {
 			rateParts = append(rateParts, part)
 		}
 		if len(rateParts) > 0 {
-			fmt.Fprintf(&out, " \033[38;5;240m│\033[0m %s", strings.Join(rateParts, " \033[38;5;240m|\033[0m "))
+			sections = append(sections, strings.Join(rateParts, " \033[38;5;240m|\033[0m "))
 		}
 	}
 
-	fmt.Print(out.String())
+	sep := " \033[38;5;240m│\033[0m "
+	fmt.Print(strings.Join(sections, sep))
 }
