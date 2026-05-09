@@ -15,8 +15,23 @@ import (
 )
 
 const pgmName = "claude-statusline"
-const pgmVersion = "1.2.0"
+const pgmVersion = "1.2.1"
 const pgmUrl = "https://github.com/jftuga/claude-statusline"
+
+const (
+	colorReset      = "\033[0m"
+	colorAccent     = "\033[38;5;141m"
+	colorModelName  = "\033[1;38;5;183m"
+	colorBarEmpty   = "\033[38;5;238m"
+	colorTokenIcon  = "\033[38;5;75m"
+	colorTokenCount = "\033[38;5;117m"
+	colorDim        = "\033[38;5;240m"
+	colorCtxSize    = "\033[38;5;60m"
+	colorCacheIcon  = "\033[38;5;220m"
+	colorCacheText  = "\033[38;5;179m"
+	colorCost       = "\033[38;5;156m"
+	colorTimer      = "\033[38;5;245m"
+)
 
 type statusInput struct {
 	Model struct {
@@ -68,6 +83,14 @@ func rateLimitColor(pct int) int {
 	}
 }
 
+func colorFg(code int) string {
+	return fmt.Sprintf("\033[38;5;%dm", code)
+}
+
+func colorFgBold(code int) string {
+	return fmt.Sprintf("\033[1;38;5;%dm", code)
+}
+
 func formatDuration(d time.Duration) string {
 	if d <= 0 {
 		return "now"
@@ -81,6 +104,16 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dd%dh", days, h)
 	}
 	return fmt.Sprintf("%dh%dm", h, m)
+}
+
+func formatRateLimit(label string, usedPct float64, resetsAt int64) string {
+	pct := int(math.Round(usedPct))
+	part := fmt.Sprintf("%s%s:%s %s%d%%%s", colorDim, label, colorReset, colorFg(rateLimitColor(pct)), pct, colorReset)
+	if resetsAt > 0 {
+		remaining := time.Unix(resetsAt, 0).Sub(time.Now())
+		part += fmt.Sprintf(" %s⟳ %s%s", colorTimer, formatDuration(remaining), colorReset)
+	}
+	return part
 }
 
 func formatTokens(n int) string {
@@ -130,9 +163,9 @@ func main() {
 	if !noModel {
 		var s strings.Builder
 		modelShort := strings.TrimPrefix(input.Model.DisplayName, "Claude ")
-		fmt.Fprintf(&s, "\033[38;5;141m◆\033[0m \033[1;38;5;183m%s\033[0m", modelShort)
+		fmt.Fprintf(&s, "%s◆%s %s%s%s", colorAccent, colorReset, colorModelName, modelShort, colorReset)
 		if input.Effort != nil && input.Effort.Level != "" {
-			fmt.Fprintf(&s, " \033[38;5;141m(%s)\033[0m", input.Effort.Level)
+			fmt.Fprintf(&s, " %s(%s)%s", colorAccent, input.Effort.Level, colorReset)
 		}
 		sections = append(sections, s.String())
 	}
@@ -143,79 +176,56 @@ func main() {
 		usedInt := int(math.Round(usedPct))
 
 		var gradient [20]int
+		var pctColor int
 		switch {
 		case usedInt < 40:
-			gradient = gradientLow
+			gradient, pctColor = gradientLow, 108
 		case usedInt < 70:
-			gradient = gradientMid
+			gradient, pctColor = gradientMid, 222
 		case usedInt < 90:
-			gradient = gradientHigh
+			gradient, pctColor = gradientHigh, 209
 		default:
-			gradient = gradientCrit
+			gradient, pctColor = gradientCrit, 196
 		}
 
 		filled := (usedInt * 20) / 100
 		for i := range 20 {
 			if i < filled {
-				fmt.Fprintf(&s, "\033[38;5;%dm━\033[0m", gradient[i])
+				fmt.Fprintf(&s, "%s━%s", colorFg(gradient[i]), colorReset)
 			} else {
-				s.WriteString("\033[38;5;238m╌\033[0m")
+				s.WriteString(colorBarEmpty + "╌" + colorReset)
 			}
 		}
-
-		var pctColor int
-		switch {
-		case usedInt < 40:
-			pctColor = 108
-		case usedInt < 70:
-			pctColor = 222
-		case usedInt < 90:
-			pctColor = 209
-		default:
-			pctColor = 196
-		}
-		fmt.Fprintf(&s, " \033[1;38;5;%dm%d%%\033[0m", pctColor, usedInt)
+		fmt.Fprintf(&s, " %s%d%%%s", colorFgBold(pctColor), usedInt, colorReset)
 		sections = append(sections, s.String())
 	}
 
 	if !noTokens {
 		totalTokens := usage.CacheReadInputTokens + usage.CacheCreationInputTokens + usage.InputTokens + usage.OutputTokens
-		sections = append(sections, fmt.Sprintf("\033[38;5;75m⟐\033[0m \033[38;5;117m%s\033[38;5;240m/\033[38;5;60m%s\033[0m", formatTokens(totalTokens), formatTokens(input.ContextWindow.ContextWindowSize)))
+		sections = append(sections, fmt.Sprintf("%s⟐%s %s%s%s/%s%s%s", colorTokenIcon, colorReset, colorTokenCount, formatTokens(totalTokens), colorDim, colorCtxSize, formatTokens(input.ContextWindow.ContextWindowSize), colorReset))
 	}
 
 	if !noCached && usage.CacheReadInputTokens > 0 {
-		sections = append(sections, fmt.Sprintf("\033[38;5;220m⚡\033[38;5;179m%dk cached\033[0m", usage.CacheReadInputTokens/1000))
+		sections = append(sections, fmt.Sprintf("%s⚡%s%dk cached%s", colorCacheIcon, colorCacheText, usage.CacheReadInputTokens/1000, colorReset))
 	}
 
 	if !noCost {
-		sections = append(sections, fmt.Sprintf("\033[38;5;156m$%.2f\033[0m", input.Cost.TotalCostUSD))
+		sections = append(sections, fmt.Sprintf("%s$%.2f%s", colorCost, input.Cost.TotalCostUSD, colorReset))
 	}
 
 	if input.RateLimits != nil {
 		var rateParts []string
 		if !no5h && input.RateLimits.FiveHour != nil {
-			pct := int(math.Round(input.RateLimits.FiveHour.UsedPercentage))
-			part := fmt.Sprintf("\033[38;5;240m5h:\033[0m \033[38;5;%dm%d%%\033[0m", rateLimitColor(pct), pct)
-			if input.RateLimits.FiveHour.ResetsAt > 0 {
-				remaining := time.Unix(input.RateLimits.FiveHour.ResetsAt, 0).Sub(time.Now())
-				part += fmt.Sprintf(" \033[38;5;245m⟳ %s\033[0m", formatDuration(remaining))
-			}
-			rateParts = append(rateParts, part)
+			rateParts = append(rateParts, formatRateLimit("5h", input.RateLimits.FiveHour.UsedPercentage, input.RateLimits.FiveHour.ResetsAt))
 		}
 		if !no7d && input.RateLimits.SevenDay != nil {
-			pct := int(math.Round(input.RateLimits.SevenDay.UsedPercentage))
-			part := fmt.Sprintf("\033[38;5;240m7d:\033[0m \033[38;5;%dm%d%%\033[0m", rateLimitColor(pct), pct)
-			if input.RateLimits.SevenDay.ResetsAt > 0 {
-				remaining := time.Unix(input.RateLimits.SevenDay.ResetsAt, 0).Sub(time.Now())
-				part += fmt.Sprintf(" \033[38;5;245m⟳ %s\033[0m", formatDuration(remaining))
-			}
-			rateParts = append(rateParts, part)
+			rateParts = append(rateParts, formatRateLimit("7d", input.RateLimits.SevenDay.UsedPercentage, input.RateLimits.SevenDay.ResetsAt))
 		}
 		if len(rateParts) > 0 {
-			sections = append(sections, strings.Join(rateParts, " \033[38;5;240m|\033[0m "))
+			sections = append(sections, strings.Join(rateParts, " "+colorDim+"|"+colorReset+" "))
 		}
 	}
 
-	sep := " \033[38;5;240m│\033[0m "
+	sep := " " + colorDim + "│" + colorReset + " "
 	fmt.Print(strings.Join(sections, sep))
 }
