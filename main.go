@@ -15,7 +15,7 @@ import (
 )
 
 const pgmName = "claude-statusline"
-const pgmVersion = "1.2.1"
+const pgmVersion = "1.3.0"
 const pgmUrl = "https://github.com/jftuga/claude-statusline"
 
 const (
@@ -31,6 +31,8 @@ const (
 	colorCacheText  = "\033[38;5;179m"
 	colorCost       = "\033[38;5;156m"
 	colorTimer      = "\033[38;5;245m"
+	colorTPMIcon    = "\033[38;5;110m"
+	colorTPMValue   = "\033[38;5;152m"
 )
 
 type statusInput struct {
@@ -40,6 +42,8 @@ type statusInput struct {
 	ContextWindow struct {
 		UsedPercentage    *float64 `json:"used_percentage"`
 		ContextWindowSize int      `json:"context_window_size"`
+		TotalInputTokens  int      `json:"total_input_tokens"`
+		TotalOutputTokens int      `json:"total_output_tokens"`
 		CurrentUsage      struct {
 			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
@@ -51,7 +55,8 @@ type statusInput struct {
 		Level string `json:"level"`
 	} `json:"effort"`
 	Cost struct {
-		TotalCostUSD float64 `json:"total_cost_usd"`
+		TotalCostUSD    float64 `json:"total_cost_usd"`
+		TotalDurationMs int64   `json:"total_duration_ms"`
 	} `json:"cost"`
 	RateLimits *struct {
 		FiveHour *struct {
@@ -127,7 +132,7 @@ func formatTokens(n int) string {
 }
 
 func main() {
-	var showVersion, noModel, noBar, noTokens, noCached, noCost, no5h, no7d bool
+	var showVersion, noModel, noBar, noTokens, noCached, noCost, noTPM, no5h, no7d bool
 	flag.BoolVar(&showVersion, "v", false, "show version")
 	flag.BoolVar(&showVersion, "version", false, "show version")
 	flag.BoolVar(&noModel, "no-model", false, "hide model name and effort level")
@@ -135,6 +140,7 @@ func main() {
 	flag.BoolVar(&noTokens, "no-tokens", false, "hide token counter")
 	flag.BoolVar(&noCached, "no-cached", false, "hide cache indicator")
 	flag.BoolVar(&noCost, "no-cost", false, "hide session cost")
+	flag.BoolVar(&noTPM, "no-tpm", false, "hide tokens per minute")
 	flag.BoolVar(&no5h, "no-5h", false, "hide 5-hour rate limit")
 	flag.BoolVar(&no7d, "no-7d", false, "hide 7-day rate limit")
 	flag.Parse()
@@ -211,6 +217,15 @@ func main() {
 
 	if !noCost {
 		sections = append(sections, fmt.Sprintf("%s$%.2f%s", colorCost, input.Cost.TotalCostUSD, colorReset))
+	}
+
+	if !noTPM {
+		totalTokens := input.ContextWindow.TotalInputTokens + input.ContextWindow.TotalOutputTokens
+		durationMs := input.Cost.TotalDurationMs
+		if totalTokens > 0 && durationMs >= 5000 {
+			tpm := float64(totalTokens) / (float64(durationMs) / 60000.0)
+			sections = append(sections, fmt.Sprintf("%s▲%s %s%s t/m%s", colorTPMIcon, colorReset, colorTPMValue, formatTokens(int(tpm)), colorReset))
+		}
 	}
 
 	if input.RateLimits != nil {
