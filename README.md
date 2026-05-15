@@ -16,7 +16,7 @@ As such, the author can't be held responsible for incorrect output.
 ![status line demo](claude_code_opus_4_6_token_usage.gif)
 
 ```
- Model (effort) | ━━━━━━━╌╌╌╌╌╌╌╌╌╌╌╌╌ 35% | tokens/window | cache | $cost | (5h%) | (7d%) | ⟳ 3d4h
+ Model (effort) | ━━━━━━━╌╌╌╌╌╌╌╌╌╌╌╌╌ 35% | tokens/window | cache | $cost | tok/min | (5h%) | (7d%) | ⟳ 3d4h
 ```
 
 | Section | Description | Colors (256-color) |
@@ -28,6 +28,7 @@ As such, the author can't be held responsible for incorrect output.
 | Token counter | Used tokens / window size with auto-scaling (k/M) | Blue diamond (75), light blue (117), dark blue-gray (60) |
 | Cache | Cache read tokens; omitted if zero | Yellow bolt (220), tan text (179) |
 | Session cost | Estimated USD cost | Light green (156) |
+| Tokens/min | Session token throughput; omitted if <5s elapsed | Steel-blue arrow (110), light cyan value (152) |
 | Rate limit (5h) | 5-hour session limit usage; omitted if absent | Green (108) / yellow (222) / red (196) |
 | Rate limit (7d) | 7-day weekly limit usage; omitted if absent | Green (108) / yellow (222) / red (196) |
 | Reset countdown | Time until 7-day limit resets; omitted if absent | Gray (245), "now" if past |
@@ -73,6 +74,7 @@ Individual sections can be hidden with `--no-*` flags:
 | `--no-tokens` | Token counter |
 | `--no-cached` | Cache indicator |
 | `--no-cost` | Session cost |
+| `--no-tpm` | Tokens per minute |
 | `--no-5h` | 5-hour rate limit |
 | `--no-7d` | 7-day rate limit |
 
@@ -97,6 +99,9 @@ The binary reads the Claude Code status line JSON from stdin. Fields consumed:
 - `context_window.current_usage.{cache_read_input_tokens,cache_creation_input_tokens,input_tokens,output_tokens}`
 - `effort.level`
 - `cost.total_cost_usd`
+- `cost.total_duration_ms`
+- `context_window.total_input_tokens`
+- `context_window.total_output_tokens`
 - `rate_limits.five_hour.used_percentage`
 - `rate_limits.seven_day.used_percentage`
 - `rate_limits.seven_day.resets_at` (unix epoch)
